@@ -1,0 +1,198 @@
+---
+title: "atividadefinalana"
+author: "Ana Clara Suhett"
+date: "01/06/2022"
+output: html_document
+---
+
+## Informações Gerais 
+
+Essa atividade tem como objetivo baixar e analisar dados de duas plataformas globais, o GBIF e o OBIS. A primeira etapa consiste em baixar os dados dessas plataformas, verificar erros e falta de ocorrências, além de padronizar os dados. 
+A segunda etapa tem foco em juntar os dados das duas plataformas, e por fim iremos realizar algumas análises para observar relações entre os padrões de riqueza, abundância, habitat e profundidade de uma espécie de peixe recifal.
+
+## 1. GBIF
+
+1.1 Instalar e carregar os pacotes necessários 
+
+```{r, echo = T, results = 'hide', message=FALSE, warning=FALSE}
+library(rgbif)
+library(tidyverse)
+library(ggmap)
+library(maps)
+library(mapdata)
+library(dplyr)
+library(robis)
+library(ggplot2)
+library(viridis)
+library(hrbrthemes)
+
+
+```
+
+1.2 Baixar ocorrências 
+
+```{r, echo=FALSE, warning=FALSE}
+paru_gbif <- occ_data(scientificName = "Pomacanthus paru", 
+                      hasCoordinate = TRUE,
+                      hasGeospatialIssue=FALSE)
+```
+
+1.3 Checar número de linhas, e a quantidade de colunas e nomes. Essa etapa é importante para escolhermos quais variáveis vamos incluir nos plots seguintes
+
+``` {r }
+dim(paru_gbif)
+
+dim(paru_gbif$data)
+
+paru_gbif$data %>% names
+```
+
+1.4 Checar erros
+
+``` {r }
+issues_gbif <- paru_gbif$data$issues %>%
+  unique()
+gbif_issues() %>%
+  data.frame() %>% 
+  filter(code %in% issues_gbif) 
+```
+
+
+1.5 Checar as variáveis
+
+``` {r }
+paru_gbif1 <- paru_gbif$data %>%
+  dplyr::select(scientificName, acceptedScientificName, decimalLatitude, decimalLongitude,
+                issues, waterBody, basisOfRecord, occurrenceStatus, rightsHolder, 
+                datasetName, recordedBy, depth, locality, habitat) %>% 
+  distinct()
+lapply(paru_gbif1, unique)
+```
+
+``` {r }
+paru_gbif_ok <- paru_gbif1
+```
+1.6 Criando o mapa 
+
+``` {r , echo = T, results = 'hide', message=FALSE}
+
+world <- map_data('world')
+
+```
+
+1.7 Criando dos pontos dentro do mapa 
+
+``` {r }
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group)) +
+  coord_fixed() +
+  theme_classic() +
+  geom_point(data = paru_gbif_ok, aes(x = decimalLongitude, y = decimalLatitude), color = "light blue") +
+  labs(x = "longitude", y = "latitude", title = expression(italic("Pomacanthus paru")))
+```
+
+## 2. OBIS
+
+2.1 Com o pacote (robis) instalado, agora vamos baixar as ocorrências e checar o nome das colunas 
+
+```{r, echo=FALSE}
+paru_obis <- robis::occurrence("Pomacanthus paru")
+
+names(paru_obis)
+
+```
+
+2.2 Selecionar collunas de registros únicos 
+
+``` {r }
+paru_obis1 <- paru_obis %>% 
+  dplyr::select(scientificName, decimalLatitude, decimalLongitude, bathymetry,
+                flags, waterBody, basisOfRecord, occurrenceStatus, rightsHolder, 
+                datasetName, recordedBy, depth, locality, habitat) %>% 
+  distinct()
+```
+
+2.3 Checar problemas reportados (flags)
+
+
+``` {r }
+paru_obis1 %>% 
+  distinct(flags)
+```
+
+
+2.4 Aqui nós filtramos as observações em terra e selecionamos as variáveis apenas em alguns habitats. 
+
+``` {r }
+
+paru_obis1 %>% 
+  filter(!flags %in% c("on_land,no_depth","no_depth,on_land", "on_land", "on_land,depth_exceeds_bath", "depth_exceeds_bath,on_land"),
+         !is.na(datasetName)) %>% 
+  lapply(., unique)
+
+
+paru_obis_ok <- paru_obis1 %>% 
+  dplyr::filter(!flags %in% c("on_land,no_depth","no_depth,on_land", "on_land", "on_land,depth_exceeds_bath", "depth_exceeds_bath,on_land"),
+         !is.na(datasetName))
+```
+
+
+2.5 Agora vamos gerar o mapa com os dados do OBIS
+
+
+``` {r,fig.align = "center" }
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group)) +
+  coord_fixed() +
+  theme_classic() +
+  geom_point(data = paru_obis_ok, aes(x = decimalLongitude, y = decimalLatitude, color = waterBody)) +
+  labs(x = "longitude", y = "latitude", title = expression(italic("Pomacanthus paru")))
+```
+
+
+## 3. Unindo os dados do GBIF e OBIS 
+
+``` {r }
+all_data <- bind_rows(paru_gbif_ok %>% 
+                        mutate(repo = paste0("gbif", row.names(.))), 
+                      paru_obis_ok %>% 
+                        mutate(repo = paste0("obis", row.names(.)))) %>%
+  column_to_rownames("repo") %>% 
+  dplyr::select(decimalLongitude, decimalLatitude, depth) %>% 
+  distinct() %>% 
+  rownames_to_column("occ") %>% 
+  separate(col = "occ", into = c("datasetName", "rn"), sep = 4) %>%
+  mutate(scientificName = "Pomacanthus paru") %>% 
+  dplyr::select(-rn)
+```
+
+3.1 Criando o mapa com todas as ocorrências 
+
+``` {r,fig.align = "center" }
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group)) +
+  coord_fixed() +
+  theme_classic() +
+  geom_point(data = all_data, aes(x = decimalLongitude, y = decimalLatitude, color = datasetName)) +
+  theme(legend.title = element_blank()) +
+  labs(x = "longitude", y = "latitude", title = expression(italic("Pomacanthus paru")))
+write.csv(all_data, "occ-GBIF-OBIS.csv", row.names = FALSE)
+```
+
+
+3.2 Histograma 
+
+Para elaborar o histograma utilizaremos o pacote ggplot2 com a função geom_density que permite ver a densidade de individuos por latitude
+
+
+``` {r,fig.align = "center" }
+
+all_data %>%
+  ggplot( aes(x=decimalLatitude)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.8) +
+    ggtitle("Distribuição por Latitude") +
+    theme_ipsum()
+
+```
+
+
